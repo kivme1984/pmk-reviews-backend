@@ -39,6 +39,14 @@ const VERIFIED_YANDEX = {
   rating: 5,
   reviewCount: 75,
   verifiedAt: "2026-06-11T23:30:00+03:00",
+  review: {
+    id: "yandex-verified-natalya-doronina",
+    author: "Наталья Доронина",
+    text: "Огромное спасибо данной фабрике по чистке ковров. Позвонила и сразу забрали ковры. Почистили быстро, в течение трёх дней. Ковры как новые, ворс поднялся.",
+    rating: 5,
+    publishedAt: "12 апреля 2025",
+    url: YANDEX_URL,
+  },
 };
 
 function corsHeaders() {
@@ -200,7 +208,7 @@ function verifiedYandexFallback() {
     ...SOURCES.yandex,
     rating: VERIFIED_YANDEX.rating,
     reviewCount: VERIFIED_YANDEX.reviewCount,
-    reviews: [],
+    reviews: [VERIFIED_YANDEX.review],
     fetchedAt: VERIFIED_YANDEX.verifiedAt,
     status: "stale",
   };
@@ -237,7 +245,7 @@ async function buildSummary(env) {
 async function getSummary(request, env, ctx) {
   const cache = caches.default;
   const cacheKey = new Request(
-    new URL("/api/reviews/summary?v=4", request.url).toString(),
+    new URL("/api/reviews/summary?v=5", request.url).toString(),
     { method: "GET" }
   );
   const cached = await cache.match(cacheKey);
