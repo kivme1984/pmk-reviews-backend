@@ -1,12 +1,13 @@
 const AVITO_URL =
   "https://www.avito.ru/brands/2f063b13cfe4e68d70057583613ffdd0/all/predlozheniya_uslug?gdlkerfdnwq=101&page_from=from_item_card&iid=3733321136&sellerId=e31389bb41c929a6a513e47ef1a71b7f";
+const YANDEX_URL =
+  "https://yandex.ru/maps/org/60740134109/reviews?reviews%5BpublicId%5D=t1q6k76wh5nge37pe1vjt7ewk4&si=t1q6k76wh5nge37pe1vjt7ewk4&utm_source=my_review";
 
 const SOURCES = {
   yandex: {
     id: "yandex",
     name: "Яндекс",
-    profileUrl:
-      "https://yandex.ru/maps/org/60740134109/reviews?reviews%5BpublicId%5D=t1q6k76wh5nge37pe1vjt7ewk4&si=t1q6k76wh5nge37pe1vjt7ewk4&utm_source=my_review",
+    profileUrl: YANDEX_URL,
   },
   avito: {
     id: "avito",
@@ -24,6 +25,12 @@ const VERIFIED_AVITO = {
   rating: 5,
   reviewCount: 342,
   verifiedAt: "2026-06-11T00:00:00+03:00",
+};
+
+const VERIFIED_YANDEX = {
+  rating: 5,
+  reviewCount: 75,
+  verifiedAt: "2026-06-11T23:30:00+03:00",
 };
 
 function corsHeaders() {
@@ -114,6 +121,58 @@ async function collectAvito(env) {
   };
 }
 
+async function collectYandex(env) {
+  const selectors = [
+    ".business-summary-rating-badge-view__rating",
+    "h2.card-section-header__title._wide",
+    ".business-review-view__author-name",
+    ".business-review-view__date",
+    ".business-review-view__body",
+  ];
+  const response = await env.BROWSER.quickAction("scrape", {
+    url: YANDEX_URL,
+    elements: selectors.map((selector) => ({ selector })),
+    gotoOptions: { waitUntil: "networkidle2", timeout: 30000 },
+  });
+  if (!response.ok) throw new Error(`Browser Run HTTP ${response.status}`);
+
+  const payload = await response.json();
+  const ratingText = scrapeResult(payload, selectors[0])[0]?.text || "";
+  const ratingMatch = ratingText.match(/\d+(?:[,.]\d+)?/);
+  const rating = ratingMatch
+    ? Number(ratingMatch[0].replace(",", "."))
+    : null;
+  const reviewHeadings = scrapeResult(payload, selectors[1]);
+  const reviewCountEntry = reviewHeadings.find((entry) =>
+    /отзыв/i.test(entry.text || "")
+  );
+  const reviewCount = parseCount(reviewCountEntry?.text);
+  if (!Number.isFinite(rating) || !reviewCount) {
+    throw new Error("Yandex rating was not found");
+  }
+
+  const authors = scrapeResult(payload, selectors[2]);
+  const dates = scrapeResult(payload, selectors[3]);
+  const texts = scrapeResult(payload, selectors[4]);
+  const reviews = texts.slice(0, 6).map((entry, index) => ({
+    id: `yandex-${index}-${dates[index]?.text || ""}`,
+    author: authors[index]?.text || "Клиент Яндекса",
+    text: entry.text,
+    rating: null,
+    publishedAt: dates[index]?.text || null,
+    url: YANDEX_URL,
+  }));
+
+  return {
+    ...SOURCES.yandex,
+    rating,
+    reviewCount,
+    reviews,
+    fetchedAt: new Date().toISOString(),
+    status: "ok",
+  };
+}
+
 function verifiedAvitoFallback() {
   return {
     ...SOURCES.avito,
@@ -125,17 +184,39 @@ function verifiedAvitoFallback() {
   };
 }
 
-async function buildSummary(env) {
-  let avito;
-  try {
-    avito = await collectAvito(env);
-  } catch {
-    avito = verifiedAvitoFallback();
-  }
+function verifiedYandexFallback() {
   return {
-    updatedAt: avito.fetchedAt,
+    ...SOURCES.yandex,
+    rating: VERIFIED_YANDEX.rating,
+    reviewCount: VERIFIED_YANDEX.reviewCount,
+    reviews: [],
+    fetchedAt: VERIFIED_YANDEX.verifiedAt,
+    status: "stale",
+  };
+}
+
+async function buildSummary(env) {
+  const [yandexResult, avitoResult] = await Promise.allSettled([
+    collectYandex(env),
+    collectAvito(env),
+  ]);
+  const yandex =
+    yandexResult.status === "fulfilled"
+      ? yandexResult.value
+      : verifiedYandexFallback();
+  const avito =
+    avitoResult.status === "fulfilled"
+      ? avitoResult.value
+      : verifiedAvitoFallback();
+  return {
+    updatedAt: new Date(
+      Math.max(
+        new Date(yandex.fetchedAt).getTime(),
+        new Date(avito.fetchedAt).getTime()
+      )
+    ).toISOString(),
     sources: [
-      unavailable(SOURCES.yandex),
+      yandex,
       avito,
       unavailable(SOURCES.vk),
     ],
@@ -145,7 +226,7 @@ async function buildSummary(env) {
 async function getSummary(request, env, ctx) {
   const cache = caches.default;
   const cacheKey = new Request(
-    new URL("/api/reviews/summary", request.url).toString(),
+    new URL("/api/reviews/summary?v=2", request.url).toString(),
     { method: "GET" }
   );
   const cached = await cache.match(cacheKey);
