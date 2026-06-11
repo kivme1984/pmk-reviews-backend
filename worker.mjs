@@ -154,14 +154,17 @@ async function collectYandex(env) {
   const authors = scrapeResult(payload, selectors[2]);
   const dates = scrapeResult(payload, selectors[3]);
   const texts = scrapeResult(payload, selectors[4]);
-  const reviews = texts.slice(0, 6).map((entry, index) => ({
-    id: `yandex-${index}-${dates[index]?.text || ""}`,
-    author: authors[index]?.text || "Клиент Яндекса",
-    text: entry.text,
-    rating: null,
-    publishedAt: dates[index]?.text || null,
-    url: YANDEX_URL,
-  }));
+  const reviews = texts
+    .map((entry, index) => ({
+      id: `yandex-${index}-${dates[index]?.text || ""}`,
+      author: authors[index]?.text || "Клиент Яндекса",
+      text: entry.text,
+      rating: null,
+      publishedAt: dates[index]?.text || null,
+      url: YANDEX_URL,
+    }))
+    .filter((review) => review.author.toLowerCase() !== "kivme")
+    .slice(0, 6);
 
   return {
     ...SOURCES.yandex,
@@ -226,7 +229,7 @@ async function buildSummary(env) {
 async function getSummary(request, env, ctx) {
   const cache = caches.default;
   const cacheKey = new Request(
-    new URL("/api/reviews/summary?v=2", request.url).toString(),
+    new URL("/api/reviews/summary?v=3", request.url).toString(),
     { method: "GET" }
   );
   const cached = await cache.match(cacheKey);
