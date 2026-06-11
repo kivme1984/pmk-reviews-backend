@@ -25,6 +25,14 @@ const VERIFIED_AVITO = {
   rating: 5,
   reviewCount: 342,
   verifiedAt: "2026-06-11T00:00:00+03:00",
+  review: {
+    id: "avito-verified-2026-06-05",
+    author: 'ООО "Сервеса Порфавор"',
+    text: "Боже это просто невероятно, ощущение что мы просто купили новые ковры 🔥🔥🔥🔥",
+    rating: 5,
+    publishedAt: "5 июня",
+    url: AVITO_URL,
+  },
 };
 
 const VERIFIED_YANDEX = {
@@ -181,7 +189,7 @@ function verifiedAvitoFallback() {
     ...SOURCES.avito,
     rating: VERIFIED_AVITO.rating,
     reviewCount: VERIFIED_AVITO.reviewCount,
-    reviews: [],
+    reviews: [VERIFIED_AVITO.review],
     fetchedAt: VERIFIED_AVITO.verifiedAt,
     status: "stale",
   };
@@ -199,18 +207,18 @@ function verifiedYandexFallback() {
 }
 
 async function buildSummary(env) {
-  const [yandexResult, avitoResult] = await Promise.allSettled([
-    collectYandex(env),
-    collectAvito(env),
-  ]);
-  const yandex =
-    yandexResult.status === "fulfilled"
-      ? yandexResult.value
-      : verifiedYandexFallback();
-  const avito =
-    avitoResult.status === "fulfilled"
-      ? avitoResult.value
-      : verifiedAvitoFallback();
+  let avito;
+  let yandex;
+  try {
+    avito = await collectAvito(env);
+  } catch {
+    avito = verifiedAvitoFallback();
+  }
+  try {
+    yandex = await collectYandex(env);
+  } catch {
+    yandex = verifiedYandexFallback();
+  }
   return {
     updatedAt: new Date(
       Math.max(
@@ -229,7 +237,7 @@ async function buildSummary(env) {
 async function getSummary(request, env, ctx) {
   const cache = caches.default;
   const cacheKey = new Request(
-    new URL("/api/reviews/summary?v=3", request.url).toString(),
+    new URL("/api/reviews/summary?v=4", request.url).toString(),
     { method: "GET" }
   );
   const cached = await cache.match(cacheKey);
