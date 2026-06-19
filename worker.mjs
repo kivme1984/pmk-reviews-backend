@@ -152,60 +152,38 @@ async function collectAvito(env) {
   };
 }
 
-async function collectYandex(env) {
-  const selectors = [
-    ".business-summary-rating-badge-view__rating",
-    ".business-reviews-card-view__title",
-    "h2.card-section-header__title._wide",
-    ".business-review-view__author-name",
-    ".business-review-view__date",
-    ".business-review-view__body",
-  ];
-  const response = await browserScrape(env, {
-    url: YANDEX_URL,
-    elements: selectors.map((selector) => ({ selector })),
-    gotoOptions: { waitUntil: "networkidle2", timeout: 30000 },
+async function collectYandex() {
+  const response = await fetch(YANDEX_URL, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "accept-language": "ru-RU,ru;q=0.9",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137 Safari/537.36",
+    },
+    redirect: "follow",
   });
-  if (!response.ok) throw new Error(`Browser Run HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Yandex HTTP ${response.status}`);
 
-  const payload = await response.json();
-  const ratingText = scrapeResult(payload, selectors[0])[0]?.text || "";
-  const ratingMatch = ratingText.match(/\d+(?:[,.]\d+)?/);
-  const rating = ratingMatch
-    ? Number(ratingMatch[0].replace(",", "."))
-    : null;
-  const reviewHeadings = [
-    ...scrapeResult(payload, selectors[1]),
-    ...scrapeResult(payload, selectors[2]),
-  ];
-  const reviewCountEntry = reviewHeadings.find((entry) =>
-    /отзыв/i.test(entry.text || "")
+  const html = await response.text();
+  const ratingMatch = html.match(
+    /itemProp=["']ratingValue["']\s+content=["'](\d+(?:[.,]\d+)?)["']/i
   );
-  const reviewCount = parseCount(reviewCountEntry?.text);
+  const reviewCountMatch = html.match(
+    /itemProp=["']reviewCount["']\s+content=["'](\d+)["']/i
+  );
+  const rating = ratingMatch
+    ? Number(ratingMatch[1].replace(",", "."))
+    : null;
+  const reviewCount = reviewCountMatch ? Number(reviewCountMatch[1]) : null;
   if (!Number.isFinite(rating) || !reviewCount) {
-    throw new Error("Yandex rating was not found");
+    throw new Error("Yandex structured rating was not found");
   }
-
-  const authors = scrapeResult(payload, selectors[3]);
-  const dates = scrapeResult(payload, selectors[4]);
-  const texts = scrapeResult(payload, selectors[5]);
-  const reviews = texts
-    .map((entry, index) => ({
-      id: `yandex-${index}-${dates[index]?.text || ""}`,
-      author: authors[index]?.text || "Клиент Яндекса",
-      text: entry.text,
-      rating: null,
-      publishedAt: dates[index]?.text || null,
-      url: YANDEX_URL,
-    }))
-    .filter((review) => review.author.toLowerCase() !== "kivme")
-    .slice(0, 6);
 
   return {
     ...SOURCES.yandex,
     rating,
     reviewCount,
-    reviews,
+    reviews: [VERIFIED_YANDEX.review],
     fetchedAt: new Date().toISOString(),
     status: "ok",
   };
@@ -269,7 +247,7 @@ async function buildSummary(env) {
 function summaryCacheKey(request) {
   const day = new Date().toISOString().slice(0, 10);
   return new Request(
-    new URL(`/api/reviews/summary?v=9&day=${day}`, request.url).toString(),
+    new URL(`/api/reviews/summary?v=10&day=${day}`, request.url).toString(),
     { method: "GET" }
   );
 }
