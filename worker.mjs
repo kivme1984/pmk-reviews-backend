@@ -91,6 +91,21 @@ function parseCount(value) {
   return match ? Number(match[0].replace(/\s/g, "")) : null;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function browserScrape(env, payload) {
+  const retryDelays = [0, 2500, 7000];
+  let response;
+  for (const delay of retryDelays) {
+    if (delay) await sleep(delay);
+    response = await env.BROWSER.quickAction("scrape", payload);
+    if (response.status !== 429) return response;
+  }
+  return response;
+}
+
 async function collectAvito(env) {
   const selectors = [
     '[data-marker="ratingSummary/rating"]',
@@ -99,7 +114,7 @@ async function collectAvito(env) {
     '[data-marker^="review("][data-marker$="/header/subtitle"]',
     '[data-marker^="review("][data-marker$="/text-section/text"]',
   ];
-  const response = await env.BROWSER.quickAction("scrape", {
+  const response = await browserScrape(env, {
     url: AVITO_URL,
     elements: selectors.map((selector) => ({ selector })),
     gotoOptions: { waitUntil: "networkidle2", timeout: 30000 },
@@ -146,7 +161,7 @@ async function collectYandex(env) {
     ".business-review-view__date",
     ".business-review-view__body",
   ];
-  const response = await env.BROWSER.quickAction("scrape", {
+  const response = await browserScrape(env, {
     url: YANDEX_URL,
     elements: selectors.map((selector) => ({ selector })),
     gotoOptions: { waitUntil: "networkidle2", timeout: 30000 },
@@ -254,7 +269,7 @@ async function buildSummary(env) {
 function summaryCacheKey(request) {
   const day = new Date().toISOString().slice(0, 10);
   return new Request(
-    new URL(`/api/reviews/summary?v=8&day=${day}`, request.url).toString(),
+    new URL(`/api/reviews/summary?v=9&day=${day}`, request.url).toString(),
     { method: "GET" }
   );
 }
