@@ -23,8 +23,8 @@ const SOURCES = {
 
 const VERIFIED_AVITO = {
   rating: 5,
-  reviewCount: 342,
-  verifiedAt: "2026-06-11T00:00:00+03:00",
+  reviewCount: 343,
+  verifiedAt: "2026-06-15T00:00:00+03:00",
   review: {
     id: "avito-verified-2026-06-05",
     author: 'ООО "Сервеса Порфавор"',
@@ -37,8 +37,8 @@ const VERIFIED_AVITO = {
 
 const VERIFIED_YANDEX = {
   rating: 5,
-  reviewCount: 75,
-  verifiedAt: "2026-06-11T23:30:00+03:00",
+  reviewCount: 76,
+  verifiedAt: "2026-06-19T12:00:00+03:00",
   review: {
     id: "yandex-verified-natalya-doronina",
     author: "Наталья Доронина",
@@ -140,6 +140,7 @@ async function collectAvito(env) {
 async function collectYandex(env) {
   const selectors = [
     ".business-summary-rating-badge-view__rating",
+    ".business-reviews-card-view__title",
     "h2.card-section-header__title._wide",
     ".business-review-view__author-name",
     ".business-review-view__date",
@@ -158,7 +159,10 @@ async function collectYandex(env) {
   const rating = ratingMatch
     ? Number(ratingMatch[0].replace(",", "."))
     : null;
-  const reviewHeadings = scrapeResult(payload, selectors[1]);
+  const reviewHeadings = [
+    ...scrapeResult(payload, selectors[1]),
+    ...scrapeResult(payload, selectors[2]),
+  ];
   const reviewCountEntry = reviewHeadings.find((entry) =>
     /отзыв/i.test(entry.text || "")
   );
@@ -167,9 +171,9 @@ async function collectYandex(env) {
     throw new Error("Yandex rating was not found");
   }
 
-  const authors = scrapeResult(payload, selectors[2]);
-  const dates = scrapeResult(payload, selectors[3]);
-  const texts = scrapeResult(payload, selectors[4]);
+  const authors = scrapeResult(payload, selectors[3]);
+  const dates = scrapeResult(payload, selectors[4]);
+  const texts = scrapeResult(payload, selectors[5]);
   const reviews = texts
     .map((entry, index) => ({
       id: `yandex-${index}-${dates[index]?.text || ""}`,
@@ -217,17 +221,21 @@ function verifiedYandexFallback() {
 async function buildSummary(env) {
   let avito;
   let yandex;
+  const collectorErrors = {};
   try {
     avito = await collectAvito(env);
-  } catch {
+  } catch (error) {
+    collectorErrors.avito = error instanceof Error ? error.message : String(error);
     avito = verifiedAvitoFallback();
   }
   try {
     yandex = await collectYandex(env);
-  } catch {
+  } catch (error) {
+    collectorErrors.yandex = error instanceof Error ? error.message : String(error);
     yandex = verifiedYandexFallback();
   }
   return {
+    generatedAt: new Date().toISOString(),
     updatedAt: new Date(
       Math.max(
         new Date(yandex.fetchedAt).getTime(),
@@ -239,23 +247,32 @@ async function buildSummary(env) {
       avito,
       unavailable(SOURCES.vk),
     ],
+    collectorErrors,
   };
+}
+
+function summaryCacheKey(request) {
+  const day = new Date().toISOString().slice(0, 10);
+  return new Request(
+    new URL(`/api/reviews/summary?v=8&day=${day}`, request.url).toString(),
+    { method: "GET" }
+  );
+}
+
+async function buildAndCacheSummary(request, env, ctx) {
+  const response = json(await buildSummary(env), 200, 300);
+  const cacheResponse = new Response(response.clone().body, response);
+  cacheResponse.headers.set("cache-control", "public, max-age=86400");
+  ctx.waitUntil(caches.default.put(summaryCacheKey(request), cacheResponse));
+  return response;
 }
 
 async function getSummary(request, env, ctx) {
   const cache = caches.default;
-  const cacheKey = new Request(
-    new URL("/api/reviews/summary?v=5", request.url).toString(),
-    { method: "GET" }
-  );
+  const cacheKey = summaryCacheKey(request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-
-  const response = json(await buildSummary(env), 200, 300);
-  const cacheResponse = new Response(response.clone().body, response);
-  cacheResponse.headers.set("cache-control", "public, max-age=86400");
-  ctx.waitUntil(cache.put(cacheKey, cacheResponse));
-  return response;
+  return buildAndCacheSummary(request, env, ctx);
 }
 
 export default {
@@ -284,5 +301,11 @@ export default {
       });
     }
     return json({ success: false, message: "Not found" }, 404);
+  },
+  async scheduled(controller, env, ctx) {
+    const request = new Request(
+      "https://pmk-reviews-backend.standart-media.workers.dev/api/reviews/summary"
+    );
+    ctx.waitUntil(buildAndCacheSummary(request, env, ctx));
   },
 };

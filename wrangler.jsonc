@@ -8,6 +8,9 @@
   "browser": {
     "binding": "BROWSER"
   },
+  "triggers": {
+    "crons": ["15 2 * * *"]
+  },
   "observability": {
     "enabled": true
   }
